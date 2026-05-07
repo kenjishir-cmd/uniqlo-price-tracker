@@ -1,0 +1,36 @@
+name: UNIQLO Price Tracker
+
+on:
+  schedule:
+    - cron: '0 1 * * *'  # 每天台灣時間早上9點
+  workflow_dispatch:       # 可手動觸發
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run price checker
+        env:
+          LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
+        run: python check_price.py
+
+      - name: Save price history
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add prices.json
+          git diff --staged --quiet || git commit -m "Update prices $(date +'%Y-%m-%d')"
+          git push
