@@ -16,47 +16,38 @@ PRICE_FILE = "prices.json"
 
 
 def get_product_info(product_id):
-    session = requests.Session()
+    short_id = product_id.replace("u0000000", "")
+
+    url = "https://www.uniqlo.com/tw/api/commerce/v5/zh_TW/products"
 
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+        "Accept": "application/json",
+        "Referer": "https://www.uniqlo.com/tw/",
+    }
+
+    params = {
+        "q": short_id,
+        "count": "1",
+        "offset": "0",
+        "lang": "zh_TW",
+        "country": "TW",
+        "withPrices": "true",
     }
 
     try:
-        # 先訪問首頁取得 cookie
-        session.get("https://www.uniqlo.com/tw/zh_TW/", headers=headers, timeout=15)
-
-        # 再呼叫 API
-        api_url = f"https://www.uniqlo.com/tw/api/commerce/v5/zh_TW/products/{product_id}/price-groups/00"
-        
-        api_headers = {
-            **headers,
-            "Accept": "application/json, text/plain, */*",
-            "Referer": f"https://www.uniqlo.com/tw/zh_TW/product-detail.html?productCode={product_id}",
-            "X-Requested-With": "XMLHttpRequest",
-        }
-
-        r = session.get(api_url, headers=api_headers, params={
-            "withPrices": "true",
-            "withStocks": "true",
-            "country": "TW",
-            "lang": "zh_TW",
-        }, timeout=15)
-
+        r = requests.get(url, headers=headers, params=params, timeout=15)
         print(f"Status: {r.status_code}")
-        print(f"Response: {r.text[:300]}")
+        print(f"Response: {r.text[:500]}")
 
         if r.status_code == 200:
             data = r.json()
-            result = data.get("result", {})
-            groups = result.get("groups", [])
-            if groups:
-                price_data = groups[0].get("priceGroup", [{}])[0].get("prices", {})
+            items = data.get("result", {}).get("items", [])
+            if items:
+                prices = items[0].get("prices", {})
                 price = (
-                    price_data.get("promo", {}).get("value")
-                    or price_data.get("base", {}).get("value")
+                    prices.get("promo", {}).get("value")
+                    or prices.get("base", {}).get("value")
                 )
                 return price, None
 
