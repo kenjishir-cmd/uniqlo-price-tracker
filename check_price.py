@@ -5,7 +5,7 @@ from datetime import datetime
 
 PRODUCTS = [
     {
-        "id": "u0000000483832",
+        "id": "u0000000053625",
         "name": "男裝 輕型連帽外套 483832",
     }
 ]
@@ -16,23 +16,19 @@ PRICE_FILE = "prices.json"
 
 
 def get_product_info(product_id):
-    short_id = product_id.replace("u0000000", "")
-
-    url = "https://www.uniqlo.com/tw/api/commerce/v5/zh_TW/products"
+    url = f"https://m.uniqlo.com/tw/api/commerce/v5/zh_TW/products/{product_id}/price-groups/00"
 
     headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+        "User-Agent": "Mozilla/5.0 (Linux; Android 13; Samsung Galaxy) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
         "Accept": "application/json",
-        "Referer": "https://www.uniqlo.com/tw/",
+        "Referer": f"https://m.uniqlo.com/tw/product?pid={product_id}",
     }
 
     params = {
-        "q": short_id,
-        "count": "1",
-        "offset": "0",
-        "lang": "zh_TW",
-        "country": "TW",
         "withPrices": "true",
+        "withStocks": "true",
+        "country": "TW",
+        "lang": "zh_TW",
     }
 
     try:
@@ -42,12 +38,13 @@ def get_product_info(product_id):
 
         if r.status_code == 200:
             data = r.json()
-            items = data.get("result", {}).get("items", [])
-            if items:
-                prices = items[0].get("prices", {})
+            result = data.get("result", {})
+            groups = result.get("groups", [])
+            if groups:
+                price_data = groups[0].get("priceGroup", [{}])[0].get("prices", {})
                 price = (
-                    prices.get("promo", {}).get("value")
-                    or prices.get("base", {}).get("value")
+                    price_data.get("promo", {}).get("value")
+                    or price_data.get("base", {}).get("value")
                 )
                 return price, None
 
