@@ -1,12 +1,11 @@
 import requests
 import json
 import os
-import re
 from datetime import datetime
 
 PRODUCTS = [
     {
-        "id": "483832",
+        "id": "u0000000483832",
         "name": "男裝 輕型連帽外套 483832",
     }
 ]
@@ -17,36 +16,47 @@ PRICE_FILE = "prices.json"
 
 
 def get_product_info(product_id):
-    # 用 UNIQLO 搜尋 API
-    url = f"https://www.uniqlo.com/tw/api/commerce/v5/zh_TW/products"
-    
+    session = requests.Session()
+
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "application/json",
-        "Referer": "https://www.uniqlo.com/tw/",
-    }
-    
-    params = {
-        "q": product_id,
-        "count": "1",
-        "offset": "0",
-        "lang": "zh_TW",
-        "country": "TW",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
     }
 
     try:
-        r = requests.get(url, headers=headers, params=params, timeout=15)
+        # 先訪問首頁取得 cookie
+        session.get("https://www.uniqlo.com/tw/zh_TW/", headers=headers, timeout=15)
+
+        # 再呼叫 API
+        api_url = f"https://www.uniqlo.com/tw/api/commerce/v5/zh_TW/products/{product_id}/price-groups/00"
+        
+        api_headers = {
+            **headers,
+            "Accept": "application/json, text/plain, */*",
+            "Referer": f"https://www.uniqlo.com/tw/zh_TW/product-detail.html?productCode={product_id}",
+            "X-Requested-With": "XMLHttpRequest",
+        }
+
+        r = session.get(api_url, headers=api_headers, params={
+            "withPrices": "true",
+            "withStocks": "true",
+            "country": "TW",
+            "lang": "zh_TW",
+        }, timeout=15)
+
         print(f"Status: {r.status_code}")
-        print(f"Response: {r.text[:500]}")
+        print(f"Response: {r.text[:300]}")
 
         if r.status_code == 200:
             data = r.json()
-            items = data.get("result", {}).get("items", [])
-            if items:
-                prices = items[0].get("prices", {})
+            result = data.get("result", {})
+            groups = result.get("groups", [])
+            if groups:
+                price_data = groups[0].get("priceGroup", [{}])[0].get("prices", {})
                 price = (
-                    prices.get("promo", {}).get("value")
-                    or prices.get("base", {}).get("value")
+                    price_data.get("promo", {}).get("value")
+                    or price_data.get("base", {}).get("value")
                 )
                 return price, None
 
@@ -102,7 +112,7 @@ def main():
 
         lines.append(f"👕 {name}")
         lines.append(f"NT${price}　{trend}")
-        lines.append(f"https://m.uniqlo.com/tw/product?pid=u0000000{pid}")
+        lines.append(f"https://m.uniqlo.com/tw/product?pid={pid}")
         lines.append("")
         updated[pid] = {"price": price, "updated": now}
 
