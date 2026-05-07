@@ -1,65 +1,49 @@
 import requests
 import json
 import os
+import re
 from datetime import datetime
 
 PRODUCTS = [
     {
-        "id": "u0000000053625",
-        "name": "UNIQLO 商品 053625",
+        "id": "u0000000483832",
+        "name": "男裝 輕型連帽外套 483832",
     }
 ]
 
 TG_TOKEN = os.environ.get("TG_TOKEN")
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID")
-
 PRICE_FILE = "prices.json"
 
 
 def get_product_info(product_id):
-    url = f"https://www.uniqlo.com/tw/api/commerce/v5/zh_TW/products/{product_id}/price-groups/00"
+    url = f"https://www.uniqlo.com/tw/zh_TW/product-detail.html?productCode={product_id}"
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
         "Accept-Language": "zh-TW,zh;q=0.9",
-        "Referer": "https://www.uniqlo.com/tw/zh_TW/",
-        "Origin": "https://www.uniqlo.com",
-    }
-
-    params = {
-        "withPrices": "true",
-        "withStocks": "true",
-        "country": "TW",
-        "lang": "zh_TW",
     }
 
     try:
-        r = requests.get(url, headers=headers, params=params, timeout=15)
+        r = requests.get(url, headers=headers, timeout=15)
         print(f"Status: {r.status_code}")
-        print(f"Response: {r.text[:500]}")
 
-        if r.status_code != 200:
-            return None, None
+        # 從網頁 HTML 找價格
+        match = re.search(r'"price":(\d+)', r.text)
+        if match:
+            price = int(match.group(1))
+            print(f"Price: {price}")
+            return price, None
 
-        data = r.json()
-        result = data.get("result", {})
-        price = None
-        groups = result.get("groups", [])
+        # 備用方式
+        match = re.search(r'NT\$\s*(\d+)', r.text)
+        if match:
+            price = int(match.group(1))
+            print(f"Price: {price}")
+            return price, None
 
-        if groups:
-            price_data = groups[0].get("priceGroup", [{}])[0].get("prices", {})
-            price = (
-                price_data.get("promo", {}).get("value")
-                or price_data.get("base", {}).get("value")
-            )
-
-        image_url = None
-        images = result.get("images", {}).get("main", [])
-        if images:
-            image_url = images[0].get("url") or images[0].get("image")
-
-        return price, image_url
+        print("Price not found in HTML")
+        print(r.text[:1000])
 
     except Exception as e:
         print(f"Error: {e}")
@@ -115,8 +99,6 @@ def main():
 
         lines.append(f"👕 {name}")
         lines.append(f"NT${price}　{trend}")
-        if image_url:
-            lines.append(f"🖼 {image_url}")
         lines.append(f"https://www.uniqlo.com/tw/zh_TW/product-detail.html?productCode={pid}")
         lines.append("")
 
