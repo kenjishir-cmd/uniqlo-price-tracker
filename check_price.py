@@ -6,7 +6,7 @@ from datetime import datetime
 
 PRODUCTS = [
     {
-        "id": "u0000000483832",
+        "id": "483832",
         "name": "男裝 輕型連帽外套 483832",
     }
 ]
@@ -17,33 +17,38 @@ PRICE_FILE = "prices.json"
 
 
 def get_product_info(product_id):
-    url = f"https://www.uniqlo.com/tw/zh_TW/product-detail.html?productCode={product_id}"
-
+    # 用 UNIQLO 搜尋 API
+    url = f"https://www.uniqlo.com/tw/api/commerce/v5/zh_TW/products"
+    
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept-Language": "zh-TW,zh;q=0.9",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json",
+        "Referer": "https://www.uniqlo.com/tw/",
+    }
+    
+    params = {
+        "q": product_id,
+        "count": "1",
+        "offset": "0",
+        "lang": "zh_TW",
+        "country": "TW",
     }
 
     try:
-        r = requests.get(url, headers=headers, timeout=15)
+        r = requests.get(url, headers=headers, params=params, timeout=15)
         print(f"Status: {r.status_code}")
+        print(f"Response: {r.text[:500]}")
 
-        # 從網頁 HTML 找價格
-        match = re.search(r'"price":(\d+)', r.text)
-        if match:
-            price = int(match.group(1))
-            print(f"Price: {price}")
-            return price, None
-
-        # 備用方式
-        match = re.search(r'NT\$\s*(\d+)', r.text)
-        if match:
-            price = int(match.group(1))
-            print(f"Price: {price}")
-            return price, None
-
-        print("Price not found in HTML")
-        print(r.text[:1000])
+        if r.status_code == 200:
+            data = r.json()
+            items = data.get("result", {}).get("items", [])
+            if items:
+                prices = items[0].get("prices", {})
+                price = (
+                    prices.get("promo", {}).get("value")
+                    or prices.get("base", {}).get("value")
+                )
+                return price, None
 
     except Exception as e:
         print(f"Error: {e}")
@@ -55,7 +60,6 @@ def send_telegram(message):
     if not TG_TOKEN or not TG_CHAT_ID:
         print("Missing Telegram config")
         return
-
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
     r = requests.post(url, json={"chat_id": TG_CHAT_ID, "text": message})
     print(r.text)
@@ -77,13 +81,12 @@ def main():
     saved = load_prices()
     updated = dict(saved)
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
-
     lines = [f"📦 UNIQLO 每日價格報告", f"🕘 {now}", ""]
 
     for product in PRODUCTS:
         pid = product["id"]
         name = product["name"]
-        price, image_url = get_product_info(pid)
+        price, _ = get_product_info(pid)
         prev_price = saved.get(pid, {}).get("price")
 
         if price is None:
@@ -99,9 +102,8 @@ def main():
 
         lines.append(f"👕 {name}")
         lines.append(f"NT${price}　{trend}")
-        lines.append(f"https://www.uniqlo.com/tw/zh_TW/product-detail.html?productCode={pid}")
+        lines.append(f"https://m.uniqlo.com/tw/product?pid=u0000000{pid}")
         lines.append("")
-
         updated[pid] = {"price": price, "updated": now}
 
     message = "\n".join(lines)
