@@ -2,8 +2,8 @@ name: UNIQLO Price Tracker
 
 on:
   schedule:
-    - cron: '0 1 * * *'  # 每天台灣時間早上9點
-  workflow_dispatch:       # 可手動觸發
+    - cron: '0 1 * * *'
+  workflow_dispatch:
 
 jobs:
   check:
@@ -24,7 +24,8 @@ jobs:
 
       - name: Run price checker
         env:
-          LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: python check_price.py
 
       - name: Save price history
