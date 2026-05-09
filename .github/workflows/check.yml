@@ -1,40 +1,133 @@
-name: UNIQLO Price Tracker
+import json
+import os
+import requests
+from datetime import datetime
+from playwright.sync_api import sync_playwright
 
-on:
-  schedule:
-    - cron: '0 1 * * *'
-  workflow_dispatch:
+PRODUCTS = [
+    {
+        "id": "u0000000053625",
+        "name": "UNIQLO 商品 053625",
+    }
+]
 
-jobs:
-  check:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
+TG_TOKEN = os.environ.get("TG_TOKEN")
+TG_CHAT_ID = os.environ.get("TG_CHAT_ID")
+PRICE_FILE = "prices.json"
 
-    steps:
-      - uses: actions/checkout@v4
+def get_product_info(product_id):
+    url = f"https://www.uniqlo.com/tw/products/{product_id}/00"
+    price = None
+    image_url = None
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1",
+            locale="zh-TW",
+        )
+        page = context.new_page()
 
-      - name: Install dependencies
-        run: |
-          pip install requests playwright
-          playwright install chromium
-          playwright install-deps chromium
+        captured = {}
+        def handle_response(response):
+            if "price-groups" in response.url or "combinations/prices" in response.url:
+                try:
+                    data = response.json()
+                    captured["price_data"] = data
+                    print(f"攔截到 API：{response.url}")
+                except:
+                    pass
+            if "products/" in response.url and "/00" in response.url:
+                try:
+                    data = response.json()
+                    captured["product_data"] = data
+                except:
+                    pass
 
-      - name: Run price checker
-        env:
-          TG_TOKEN: ${{ secrets.TG_TOKEN }}
-          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        run: python check_price.py
+        page.on("response", handle_response)
 
-      - name: Save price history
-        run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git add prices.json
-          git diff --staged --quiet || git commit -m "Update prices $(date +'%Y-%m-%d')"
-          git push
+        try:
+            print(f"開啟頁面：{url}")
+            page.goto(url, wait_until="networkidle", timeout=30000)
+            page.wait_for_timeout(3000)
+
+            if "price_data" in captured:
+                result = captured["price_data"].get("result", {})
+                groups = result.get("groups", [])
+                if groups:
+                    price_data = groups[0].get("priceGroup", [{}])[0].get("prices", {})
+                    price = price_data.get("base", {}).get("value") or price_data.get("promo", {}).get("value")
+
+            if not price:
+                try:
+                    price_el = page.locator(".price, [class*='price'], [class*='Price']").first
+                    price_text = price_el.inner_text()
+                    price = int("".join(filter(str.isdigit, price_text)))
+                    print(f"DOM 取得價格：{price_text}")
+                except:
+                    pass
+
+            try:
+                img_el = page.locator("img[class*='product'], img[class*='main']").first
+                image_url = img_el.get_attribute("src")
+            except:
+                pass
+
+        except Exception as e:
+            print(f"Error: {e}")
+        finally:
+            browser.close()
+
+    print(f"價格：{price}，圖片：{image_url}")
+    return price, image_url
+
+def send_telegram(message):
+    if not TG_TOKEN or not TG_CHAT_ID:
+        print("No Telegram credentials")
+        return
+    requests.post(
+        f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+        data={
+            "chat_id": TG_CHAT_ID,
+            "text": message,
+        }
+    )
+
+def load_prices():
+    if os.path.exists(PRICE_FILE):
+        with open(PRICE_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+def save_prices(prices):
+    with open(PRICE_FILE, "w") as f:
+        json.dump(prices, f, ensure_ascii=False, indent=2)
+
+def main():
+    saved = load_prices()
+    updated = dict(saved)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    lines = [f"📦 UNIQLO 每日價格報告\n🕘 {now}\n"]
+
+    for product in PRODUCTS:
+        pid = product["id"]
+        name = product["name"]
+        price, image_url = get_product_info(pid)
+        prev_price = saved.get(pid, {}).get("price")
+
+        if price is None:
+            lines.append(f"❌ {name}：無法取得價格")
+            continue
+
+        if prev_price and price < prev_price:
+            trend = f"📉 降價（之前 NT${prev_price}）"
+        elif prev_price and price > prev_price:
+            trend = f"📈 漲價（之前 NT${prev_price}）"
+        else:
+            trend = "➡️ 無變動"
+
+        lines.append(f"👕 {name}")
+        lines.append(f"💰 NT${price}　{trend}")
+        if image_url:
+            lines.append(f"🖼 圖片：{image_url}")
+        lines.append(f"🔗 https://m.uniqlo.com/tw/product?pid
