@@ -1,7 +1,7 @@
-import requests
 import json
 import os
 from datetime import datetime
+from playwright.sync_api import sync_playwright
 
 PRODUCTS = [
     {
@@ -15,63 +15,76 @@ TG_CHAT_ID = os.environ.get("TG_CHAT_ID")
 PRICE_FILE = "prices.json"
 
 def get_product_info(product_id):
-    headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1",
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "zh-TW,zh;q=0.9",
-        "Referer": "https://www.uniqlo.com/tw/",
-        "sec-fetch-site": "same-origin",
-        "sec-fetch-mode": "cors",
-        "sec-fetch-dest": "empty",
-    }
+    url = f"https://www.uniqlo.com/tw/products/{product_id}/00"
+    price = None
+    image_url = None
 
-    # 嘗試多個 API 端點
-    urls = [
-        f"https://www.uniqlo.com/tw/api/commerce/v5/zh_TW/products/{product_id}/combinations/prices?withStocks=true&country=TW&lang=zh_TW",
-        f"https://www.uniqlo.com/tw/api/commerce/v5/zh_TW/products/{product_id}/price-groups/00?withPrices=true&withStocks=true&country=TW&lang=zh_TW",
-        f"https://d.uniqlo.com/p/hmall/{product_id}/zh_TW/price/zh_TW",
-    ]
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1",
+            locale="zh-TW",
+        )
+        page = context.new_page()
 
-    for url in urls:
+        # 攔截 API 回應
+        captured = {}
+        def handle_response(response):
+            if "price-groups" in response.url or "combinations/prices" in response.url:
+                try:
+                    data = response.json()
+                    captured["price_data"] = data
+                    print(f"攔截到 API：{response.url}")
+                except:
+                    pass
+            if "products/" in response.url and "/00" in response.url:
+                try:
+                    data = response.json()
+                    captured["product_data"] = data
+                except:
+                    pass
+
+        page.on("response", handle_response)
+
         try:
-            print(f"嘗試：{url}")
-            r = requests.get(url, headers=headers, timeout=10)
-            print(f"Status: {r.status_code}")
+            print(f"開啟頁面：{url}")
+            page.goto(url, wait_until="networkidle", timeout=30000)
+            page.wait_for_timeout(3000)
 
-            if r.status_code != 200:
-                continue
+            # 從攔截的 API 取價格
+            if "price_data" in captured:
+                result = captured["price_data"].get("result", {})
+                groups = result.get("groups", [])
+                if groups:
+                    price_data = groups[0].get("priceGroup", [{}])[0].get("prices", {})
+                    price = price_data.get("base", {}).get("value") or price_data.get("promo", {}).get("value")
 
-            data = r.json()
-            print(f"Response: {json.dumps(data)[:200]}")
-            result = data.get("result", {})
-
-            # 嘗試取價格
-            price = None
-            groups = result.get("groups", [])
-            if groups:
-                price_data = groups[0].get("priceGroup", [{}])[0].get("prices", {})
-                price = price_data.get("base", {}).get("value") or price_data.get("promo", {}).get("value")
-
+            # 備用：直接從頁面 DOM 抓價格
             if not price:
-                # 備用解析方式
-                price = result.get("price") or result.get("basePrice") or result.get("value")
+                try:
+                    price_el = page.locator(".price, [class*='price'], [class*='Price']").first
+                    price_text = price_el.inner_text()
+                    price = int("".join(filter(str.isdigit, price_text)))
+                    print(f"DOM 取得價格：{price_text}")
+                except:
+                    pass
 
-            # 嘗試取圖片
-            image_url = None
-            images = result.get("images", {}).get("main", [])
-            if images:
-                image_url = images[0].get("url") or images[0].get("image")
-
-            if price:
-                return price, image_url
+            # 取圖片
+            try:
+                img_el = page.locator("img[class*='product'], img[class*='main']").first
+                image_url = img_el.get_attribute("src")
+            except:
+                pass
 
         except Exception as e:
             print(f"Error: {e}")
-            continue
+        finally:
+            browser.close()
 
-    return None, None
+    return price, image_url
 
 def send_telegram(message):
+    import requests
     if not TG_TOKEN or not TG_CHAT_ID:
         print("No Telegram credentials")
         return
