@@ -11,8 +11,6 @@ PRODUCTS = [
     }
 ]
 
-TG_TOKEN = os.environ.get("TG_TOKEN")
-TG_CHAT_ID = os.environ.get("TG_CHAT_ID")
 PRICE_FILE = "prices.json"
 
 def get_product_info(product_id):
@@ -81,14 +79,14 @@ def get_product_info(product_id):
     print(f"價格：{price}，圖片：{image_url}")
     return price, image_url
 
-def send_telegram(message):
-    if not TG_TOKEN or not TG_CHAT_ID:
+def send_telegram(message, tg_token, tg_chat_id):
+    if not tg_token or not tg_chat_id:
         print("No Telegram credentials")
         return
     requests.post(
-        f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+        f"https://api.telegram.org/bot{tg_token}/sendMessage",
         data={
-            "chat_id": TG_CHAT_ID,
+            "chat_id": tg_chat_id,
             "text": message,
         }
     )
@@ -104,6 +102,12 @@ def save_prices(prices):
         json.dump(prices, f, ensure_ascii=False, indent=2)
 
 def main():
+    global TG_TOKEN, TG_CHAT_ID
+    TG_TOKEN = os.environ.get("TG_TOKEN")
+    TG_CHAT_ID = os.environ.get("TG_CHAT_ID")
+    print(f"TG_TOKEN 存在: {bool(TG_TOKEN)}")
+    print(f"TG_CHAT_ID 存在: {bool(TG_CHAT_ID)}")
+
     saved = load_prices()
     updated = dict(saved)
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -117,24 +121,22 @@ def main():
 
         if price is None:
             lines.append(f"❌ {name}：無法取得價格")
-            continue
-
-        if prev_price and price < prev_price:
-            trend = f"📉 降價（之前 NT${prev_price}）"
-        elif prev_price and price > prev_price:
-            trend = f"📈 漲價（之前 NT${prev_price}）"
         else:
-            trend = "➡️ 無變動"
+            if prev_price and price < prev_price:
+                trend = f"📉 降價（之前 NT${prev_price}）"
+            elif prev_price and price > prev_price:
+                trend = f"📈 漲價（之前 NT${prev_price}）"
+            else:
+                trend = "➡️ 無變動"
 
-        lines.append(f"👕 {name}")
-        lines.append(f"💰 NT${price}　{trend}")
-        if image_url:
-            lines.append(f"🖼 圖片：{image_url}")
-        lines.append(f"🔗 https://m.uniqlo.com/tw/product?pid={pid}")
+            lines.append(f"👕 {name}")
+            lines.append(f"💰 NT${price}　{trend}")
+            if image_url:
+                lines.append(f"🖼 圖片：{image_url}")
+            lines.append(f"🔗 https://m.uniqlo.com/tw/product?pid={pid}")
+            updated[pid] = {"price": price, "updated": now}
 
-        updated[pid] = {"price": price, "updated": now}
-
-    send_telegram("\n".join(lines))
+    send_telegram("\n".join(lines), TG_TOKEN, TG_CHAT_ID)
     save_prices(updated)
     print("完成！")
 
